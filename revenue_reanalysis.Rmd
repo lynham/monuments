@@ -1,0 +1,231 @@
+---
+title: "Replicating our paper using revenue-per-unit-effort"
+author: "John Lynham"
+date: "08/18/2020"
+output:
+  pdf_document: default
+  html_document:
+    code_folding: hide
+code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+### Step 1
+
+Let's load the observer data-set and recreate our main results table.
+
+```{r, message=FALSE}
+## Catch and CPUE Regressions
+library(foreign)
+library(sandwich)
+library(lmtest)
+library(car)
+library(AER)
+library(stargazer)
+library(data.table)
+library(ggplot2)
+options(max.print=100000)
+
+NOAA.raw <- read.csv(file="/Users/lynham/Documents/CSF MPA Project/cleaned_observer_data_090618.csv", header=TRUE, sep=",")
+
+setnames(NOAA.raw, "set_year", "SET_YEAR")
+setnames(NOAA.raw, "set_month", "SET_MONTH")
+setnames(NOAA.raw, "set_day", "SET_DAY")
+setnames(NOAA.raw, "hawaii", "HAWAII")
+
+NOAA.raw$date_value <- as.Date(NOAA.raw$date,"%m/%d/%y")
+
+NOAA.raw$PRI_dummy <- as.numeric((NOAA.raw$SET_YEAR >= 2014) & (NOAA.raw$SET_MONTH >= 9) & (NOAA.raw$SET_DAY >= 25)| (NOAA.raw$SET_YEAR >= 2014) & (NOAA.raw$SET_MONTH >= 10) | (NOAA.raw$SET_YEAR >= 2015))
+NOAA.raw$PMNM_dummy <- as.numeric((NOAA.raw$SET_YEAR >= 2016) & (NOAA.raw$SET_MONTH >= 8) & (NOAA.raw$SET_DAY >= 26)| (NOAA.raw$SET_YEAR >= 2016) & (NOAA.raw$SET_MONTH >= 9) | (NOAA.raw$SET_YEAR >= 2017))
+
+NOAA.raw$WCPFC_2017 <- as.numeric((NOAA.raw$SET_YEAR == 2017) & (NOAA.raw$SET_MONTH == 9) | (NOAA.raw$SET_YEAR == 2017) & (NOAA.raw$SET_MONTH == 10) & (NOAA.raw$SET_DAY <= 9))
+NOAA.raw$WCPFC_2016 <- as.numeric((NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 7) & (NOAA.raw$SET_DAY >= 22) | (NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 8) |(NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 9) & (NOAA.raw$SET_DAY <= 8))
+NOAA.raw$WCPFC_2015 <- as.numeric((NOAA.raw$SET_YEAR == 2015) & (NOAA.raw$SET_MONTH == 8) & (NOAA.raw$SET_DAY >= 15) | (NOAA.raw$SET_YEAR == 2015) & (NOAA.raw$SET_MONTH == 9) |(NOAA.raw$SET_YEAR == 2015) & (NOAA.raw$SET_MONTH == 10) & (NOAA.raw$SET_DAY <= 8))
+NOAA.raw$WCPFC_2010 <- as.numeric((NOAA.raw$SET_YEAR == 2010) & (NOAA.raw$SET_MONTH == 11) & (NOAA.raw$SET_DAY >= 22) | (NOAA.raw$SET_YEAR == 2010) & (NOAA.raw$SET_MONTH == 12))
+NOAA.raw$WCPFC_2009 <- as.numeric((NOAA.raw$SET_YEAR == 2009) & (NOAA.raw$SET_MONTH == 12) & (NOAA.raw$SET_DAY >= 27))
+
+NOAA.raw$WCPFC_close <- NOAA.raw$WCPFC_2009 + NOAA.raw$WCPFC_2010 + NOAA.raw$WCPFC_2015 + NOAA.raw$WCPFC_2016 + NOAA.raw$WCPFC_2017
+NOAA.raw$WCPFC_2009<-NULL 
+NOAA.raw$WCPFC_2010<-NULL
+NOAA.raw$WCPFC_2015<-NULL
+NOAA.raw$WCPFC_2016<-NULL
+NOAA.raw$WCPFC_2017<-NULL
+
+NOAA.raw$IATTC_2017 <- as.numeric((NOAA.raw$SET_YEAR == 2017) & (NOAA.raw$SET_MONTH == 9) & (NOAA.raw$SET_DAY >= 8) | (NOAA.raw$SET_YEAR == 2017) & (NOAA.raw$SET_MONTH == 10) | (NOAA.raw$SET_YEAR == 2017) & (NOAA.raw$SET_MONTH == 11) | (NOAA.raw$SET_YEAR == 2017) & (NOAA.raw$SET_MONTH == 12))
+NOAA.raw$IATTC_2016 <- as.numeric((NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 7) & (NOAA.raw$SET_DAY >= 25) | (NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 8) | (NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 9) | (NOAA.raw$SET_YEAR == 2016) & (NOAA.raw$SET_MONTH == 10) & (NOAA.raw$SET_DAY < 4))
+NOAA.raw$IATTC_2015 <- as.numeric((NOAA.raw$SET_YEAR == 2015) & (NOAA.raw$SET_MONTH == 8) & (NOAA.raw$SET_DAY >= 12) | (NOAA.raw$SET_YEAR == 2015) & (NOAA.raw$SET_MONTH >= 9) )
+NOAA.raw$IATTC_2014 <- as.numeric((NOAA.raw$SET_YEAR == 2014) & (NOAA.raw$SET_MONTH == 10) & (NOAA.raw$SET_DAY >= 31) | (NOAA.raw$SET_YEAR == 2014) & (NOAA.raw$SET_MONTH >= 11) )
+NOAA.raw$IATTC_2013 <- as.numeric((NOAA.raw$SET_YEAR == 2013) & (NOAA.raw$SET_MONTH == 11) & (NOAA.raw$SET_DAY >= 11) | (NOAA.raw$SET_YEAR == 2013) & (NOAA.raw$SET_MONTH == 12) )
+
+NOAA.raw$IATTC_close <- NOAA.raw$IATTC_2013 + NOAA.raw$IATTC_2014 + NOAA.raw$IATTC_2015 + NOAA.raw$IATTC_2016 + NOAA.raw$IATTC_2017
+NOAA.raw$IATTC_2013<-NULL 
+NOAA.raw$IATTC_2014<-NULL 
+NOAA.raw$IATTC_2015<-NULL
+NOAA.raw$IATTC_2016<-NULL
+NOAA.raw$IATTC_2017<-NULL
+
+NOAA.raw$tuna <- NOAA.raw$count_bigeye_tuna + NOAA.raw$count_yellowfin_tuna
+NOAA.raw$all_tuna <- NOAA.raw$count_bigeye_tuna + NOAA.raw$count_yellowfin_tuna + NOAA.raw$count_albacore_tuna + NOAA.raw$count_skipjack_tuna + NOAA.raw$count_bluefin_tuna + NOAA.raw$count_unid_tuna
+NOAA.raw$tuna.cpue <- (NOAA.raw$tuna/NOAA.raw$num_hks_set)*1000
+NOAA.raw$all_tuna.cpue <- (NOAA.raw$all_tuna/NOAA.raw$num_hks_set)*1000
+NOAA.raw$sword.cpue <- (NOAA.raw$count_swordfish/NOAA.raw$num_hks_set)*1000
+
+NOAA.raw$deep <- NOAA.raw$sword-1
+NOAA.raw <- within(NOAA.raw, deep[sword==0] <- 1)
+NOAA.raw$HAWAIITUNA <- NOAA.raw$deep
+NOAA.raw <- within(NOAA.raw, HAWAIITUNA[HAWAII==0] <- 0)
+
+newdata <- NOAA.raw[order(NOAA.raw$date_value),]
+NOAA.raw <- newdata
+rm(newdata)
+```
+
+
+```{r, message=FALSE}
+#################################
+#Policy Forum Diff-in-Diff Table
+#################################
+
+one.lm = lm(tuna.cpue ~ PRI_dummy*HAWAIITUNA, data=subset(NOAA.raw, SET_YEAR>=2010 & PMNM_dummy==0 & HAWAII==1) )
+#summary(one.lm)
+#coeftest(one.lm, vcov = vcovHC(one.lm, type="HC1"))
+
+
+two.lm = lm(tuna.cpue ~ PRI_dummy*HAWAIITUNA + factor(SET_MONTH) + factor(SET_YEAR), data=subset(NOAA.raw, SET_YEAR>=2010 & PMNM_dummy==0 & HAWAII==1) )
+#summary(two.lm)
+#coeftest(two.lm, vcov = vcovHC(two.lm, type="HC1"))
+
+
+three.lm = lm(tuna.cpue ~ PRI_dummy*HAWAIITUNA + +factor(SET_YEAR) + WCPFC_close + IATTC_close + experiment + nino3 + lag1nino3 + lag2nino3 + lag3nino3 + factor(SET_MONTH) + factor(vessel_id), data=subset(NOAA.raw, SET_YEAR>=2010 & PMNM_dummy==0 & HAWAII==1) )
+#summary(three.lm)
+#coeftest(three.lm, vcov = vcovHC(three.lm, type="HC1"))
+
+four.lm = lm(tuna.cpue ~ PMNM_dummy + PMNM_dummy*HAWAIITUNA, data=subset(NOAA.raw, SET_YEAR>=2010 & sword==0) )
+#summary(four.lm)
+#coeftest(four.lm, vcov = vcovHC(four.lm, type="HC1")) 
+
+five.lm = lm(tuna.cpue ~ PMNM_dummy + PMNM_dummy*HAWAIITUNA + factor(SET_MONTH) +factor(SET_YEAR), data=subset(NOAA.raw, SET_YEAR>=2010 & sword==0) )
+#summary(five.lm)
+#coeftest(five.lm, vcov = vcovHC(five.lm, type="HC1")) 
+
+six.lm = lm(tuna.cpue ~ PMNM_dummy + PMNM_dummy*HAWAIITUNA + factor(SET_YEAR) + WCPFC_close + IATTC_close + experiment + nino3 + lag1nino3 + lag2nino3 + lag3nino3 + factor(SET_MONTH) + factor(vessel_id), data=subset(NOAA.raw, SET_YEAR>=2010 & sword==0) )
+#summary(six.lm)
+#coeftest(six.lm, vcov = vcovHC(six.lm, type="HC1"))
+
+robust_se <- list(sqrt(diag(vcovHC(one.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(two.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(three.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(four.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(five.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(six.lm, type = "HC1"))))
+```
+
+
+```{r stargazer_cpueDID, echo=FALSE, results='asis', message=FALSE}
+stargazer(one.lm, two.lm, three.lm, four.lm, five.lm, six.lm, title="Diference-in-Differences Estimation",
+          intercept.bottom = FALSE, label="tab:PolicyForumDID",
+          se        = robust_se,
+          dep.var.labels.include = FALSE, dep.var.caption = "",
+          add.lines = list(c("Month Dummies", "No", "Yes", "Yes","No", "Yes", "Yes"),c("Year Dummies", "No", "Yes", "Yes","No", "Yes", "Yes"), c("Vessel Dummies", "No", "No","Yes","No", "No","Yes"), c("Additional Controls", "No", "No","Yes","No", "No","Yes")),
+          omit.stat=c("LL","ser","f","adj.rsq"), no.space=TRUE, keep = c("PRI_dummy","HAWAIITUNA","PRI_dummy*HAWAIITUNA","PMNM_dummy","PMNM_dummy*HAWAIITUNA"),
+ #         notes.label = "Notes:",
+          notes.label = NULL,
+          notes.append = FALSE,    
+          notes.align = "l",
+          omit.table.layout = "n",
+          covariate.labels = c("PRI Expansion","PMNM Expansion","Hawaii-based Tuna Trips","PRI * Hawaii","PMNM * Hawaii")
+ #         out="/Volumes/GoogleDrive/My Drive/Large MPA Data Depository/drafts/PolicyForumDID.tex"
+ )
+```
+Notes: The dependent variable in all columns is Catch of Bigeye and Yellowfin Tuna per 1,000 Hooks. In Columns (1)-(3), the control group is Hawaii-based swordfish trips and the sample runs from January 1st 2010 to August 25th 2016. In Columns (4)-(6), the control group is American Samoa-based tuna trips and the sample runs from January 1st 2010 to December 31st 2017. Heteroskedasticity-robust standard errors presented in parentheses. The Additional Controls are whether the set included an experimental component, a dummy variable for whether the WCPFC waters were closed to fishing, a dummy variable for whether IATTC waters were closed to vessels longer than 24m, Monthly El Nino indicator, Monthly El Nino indicator lagged by one year, Monthly El Nino indicator lagged by two years, and Monthly El Nino indicator lagged by three years. $^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01 for two-sided t-test of statistical significance using heteroskedasticity-robust standard errors.
+          
+```{r}
+rm(one.lm,two.lm,three.lm,four.lm,five.lm,six.lm,robust_se)
+```
+
+Now let's do the same thing but using revenue-per-1000 hooks as the outcome variable.
+
+Unfortunately, I don't have access to any fine-scale data on weight and prices. WESPAC publishes information on annual prices in their SAFE Pelagic reports (typically Tables 19(22) and 24). They also publish data on average weight. I  use that to calculate the total revenue from each set. I am missing a few species but they are only a small percentage of total revenue. For 2012 yellowfin tuna, I imputed the price to be \$3.27 instead of the reported price of \$1.78, which seems way too low compared to other species that year (and doesn't add up). And for 2014 bluefin, I impute the weight per fish to be the average of all other years (since this data is missing): 275.8 lbs. For unidentified tuna, I am using yellowfin tuna weight and price. It shouldn't matter that much. There is data on price of "other tunas" but no info on weight per fish.
+
+```{r, message=FALSE}
+NOAA.raw$all.fish <- NOAA.raw$count_bigeye_tuna + NOAA.raw$count_yellowfin_tuna + NOAA.raw$count_albacore_tuna + NOAA.raw$count_skipjack_tuna + NOAA.raw$count_bluefin_tuna + NOAA.raw$count_unid_tuna + NOAA.raw$count_swordfish
+NOAA.raw$all.fish.cpue <- (NOAA.raw$all.fish/NOAA.raw$num_hks_set)*1000
+
+#monthly.cpue <- aggregate(all.fish.cpue ~ SET_YEAR + SET_MONTH + high_effort + medium_effort + no_effort, NOAA.raw, mean)
+#monthly.cpue$date <- as.Date(paste(15,monthly.cpue$SET_MONTH,monthly.cpue$SET_YEAR),"%d%m%Y")
+
+species.prices <- read.csv(file="/Volumes/GoogleDrive/My Drive/Large MPA Data Depository/Prices/annual_species_prices.csv", header=TRUE, sep=",")
+combine.with.prices <-merge(NOAA.raw,species.prices,by="SET_YEAR",all.x = TRUE)
+NOAA.raw <- combine.with.prices
+
+NOAA.raw$all.revenue <- (NOAA.raw$count_bigeye_tuna*NOAA.raw$bigeye_weight*NOAA.raw$bigeye_price) + (NOAA.raw$count_yellowfin_tuna*NOAA.raw$yellowfin_weight*NOAA.raw$yellowfin_price) + 
+  NOAA.raw$count_albacore_tuna*NOAA.raw$bigeye_weight*NOAA.raw$bigeye_price + 
+  NOAA.raw$count_skipjack_tuna*NOAA.raw$skipjack_weight*NOAA.raw$skipjack_price + 
+  NOAA.raw$count_bluefin_tuna*NOAA.raw$bluefin_weight*NOAA.raw$bluefin_price + 
+  NOAA.raw$count_unid_tuna*NOAA.raw$yellowfin_weight*NOAA.raw$yellowfin_price + 
+  NOAA.raw$count_swordfish*NOAA.raw$swordfish_weight*NOAA.raw$swordfish_price
+
+NOAA.raw$all.rpue <- (NOAA.raw$all.revenue/NOAA.raw$num_hks_set)*1000
+
+```
+
+```{r, message=FALSE}
+#################################
+#Policy Forum Diff-in-Diff Table for Revenue
+#################################
+
+one.lm = lm(all.rpue ~ PRI_dummy*HAWAIITUNA, data=subset(NOAA.raw, SET_YEAR>=2010 & PMNM_dummy==0 & HAWAII==1) )
+#summary(one.lm)
+#coeftest(one.lm, vcov = vcovHC(one.lm, type="HC1"))
+
+
+two.lm = lm(all.rpue ~ PRI_dummy*HAWAIITUNA + factor(SET_MONTH) + factor(SET_YEAR), data=subset(NOAA.raw, SET_YEAR>=2010 & PMNM_dummy==0 & HAWAII==1) )
+#summary(two.lm)
+#coeftest(two.lm, vcov = vcovHC(two.lm, type="HC1"))
+
+
+three.lm = lm(all.rpue ~ PRI_dummy*HAWAIITUNA + +factor(SET_YEAR) + WCPFC_close + IATTC_close + experiment + nino3 + lag1nino3 + lag2nino3 + lag3nino3 + factor(SET_MONTH) + factor(vessel_id), data=subset(NOAA.raw, SET_YEAR>=2010 & PMNM_dummy==0 & HAWAII==1) )
+#summary(three.lm)
+#
+
+four.lm = lm(all.rpue ~ PMNM_dummy + PMNM_dummy*HAWAIITUNA, data=subset(NOAA.raw, SET_YEAR>=2010 & sword==0) )
+#summary(four.lm)
+#coeftest(four.lm, vcov = vcovHC(four.lm, type="HC1")) 
+
+five.lm = lm(all.rpue ~ PMNM_dummy + PMNM_dummy*HAWAIITUNA + factor(SET_MONTH) +factor(SET_YEAR), data=subset(NOAA.raw, SET_YEAR>=2010 & sword==0) )
+#summary(five.lm)
+#coeftest(five.lm, vcov = vcovHC(five.lm, type="HC1")) 
+
+six.lm = lm(all.rpue ~ PMNM_dummy + PMNM_dummy*HAWAIITUNA + factor(SET_YEAR) + WCPFC_close + IATTC_close + experiment + nino3 + lag1nino3 + lag2nino3 + lag3nino3 + factor(SET_MONTH) + factor(vessel_id), data=subset(NOAA.raw, SET_YEAR>=2010 & sword==0) )
+#summary(six.lm)
+#coeftest(six.lm, vcov = vcovHC(six.lm, type="HC1"))
+
+robust_se <- list(sqrt(diag(vcovHC(one.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(two.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(three.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(four.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(five.lm, type = "HC1"))),
+                  sqrt(diag(vcovHC(six.lm, type = "HC1"))))
+```
+
+```{r stargazer_rpueDID, echo=FALSE, results='asis', message=FALSE}
+stargazer(one.lm, two.lm, three.lm, four.lm, five.lm, six.lm, title="Diference-in-Differences Estimation",
+          intercept.bottom = FALSE, label="tab:rpueDID",
+          se        = robust_se,
+          dep.var.labels.include = FALSE, dep.var.caption = "",
+          add.lines = list(c("Month Dummies", "No", "Yes", "Yes","No", "Yes", "Yes"),c("Year Dummies", "No", "Yes", "Yes","No", "Yes", "Yes"), c("Vessel Dummies", "No", "No","Yes","No", "No","Yes"), c("Additional Controls", "No", "No","Yes","No", "No","Yes")),
+          omit.stat=c("LL","ser","f","adj.rsq"), no.space=TRUE, keep = c("PRI_dummy","HAWAIITUNA","PRI_dummy*HAWAIITUNA","PMNM_dummy","PMNM_dummy*HAWAIITUNA"),
+ #         notes.label = "Notes:",
+          notes.label = NULL,
+          notes.append = FALSE,    
+          notes.align = "l",
+          omit.table.layout = "n",
+          covariate.labels = c("PRI Expansion","PMNM Expansion","Hawaii-based Tuna Trips","PRI * Hawaii","PMNM * Hawaii"),
+          out="/Volumes/GoogleDrive/My Drive/Large MPA Data Depository/drafts/rpueDID.tex"
+ )
+```
+Notes: The dependent variable in all columns is Revenue per 1,000 Hooks. In Columns (1)-(3), the control group is Hawaii-based swordfish trips and the sample runs from January 1st 2010 to August 25th 2016. In Columns (4)-(6), the control group is American Samoa-based tuna trips and the sample runs from January 1st 2010 to December 31st 2017. Heteroskedasticity-robust standard errors presented in parentheses. The Additional Controls are whether the set included an experimental component, a dummy variable for whether the WCPFC waters were closed to fishing, a dummy variable for whether IATTC waters were closed to vessels longer than 24m, Monthly El Nino indicator, Monthly El Nino indicator lagged by one year, Monthly El Nino indicator lagged by two years, and Monthly El Nino indicator lagged by three years. $^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01 for two-sided t-test of statistical significance using heteroskedasticity-robust standard errors.
